@@ -57,6 +57,7 @@
 		"zod": "catalog:default"
 	},
 	"devDependencies": {
+		"@cloudflare/build-output-utils": "workspace:*",
 		"@cloudflare/cli-shared-helpers": "workspace:*",
 		"@cloudflare/config": "workspace:*",
 		"@cloudflare/mock-npm-registry": "workspace:*",

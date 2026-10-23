@@ -107,6 +107,23 @@ describe("parseProjectOptions()", () => {
 				"`miniflare` and `config` cannot be used together. Configure the Worker in `cloudflare.config.ts` instead.",
 		},
 		{
+			name: "`auxiliaryWorkers` without `config`",
+			options: { auxiliaryWorkers: [{ buildOutput: { root: "./other" } }] },
+			message:
+				"`auxiliaryWorkers` requires `config`. Without it, define auxiliary Workers in `miniflare.workers`.",
+		},
+		{
+			name: "an auxiliary Worker that hasn't been built",
+			files: {
+				"cloudflare.config.ts": `export default { worker: { name: "test-worker", compatibilityDate: "2025-12-02" } };`,
+			},
+			options: {
+				config: true,
+				auxiliaryWorkers: [{ buildOutput: { root: "./other" } }],
+			},
+			message: "Build the project first, for example in `globalSetup`.",
+		},
+		{
 			name: "a missing cloudflare.config.ts",
 			options: { config: true },
 			message: "`config` is enabled but no `cloudflare.config.ts` was found at",

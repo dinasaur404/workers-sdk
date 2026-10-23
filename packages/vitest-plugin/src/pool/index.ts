@@ -784,11 +784,14 @@ async function buildProjectMiniflareOptions(
 
 	const miniflareOptions = convertV4MiniflareOptions(options);
 	if (customOptions.loadedCloudflareConfig !== undefined) {
+		const buildOutputWorkers = customOptions.loadedAuxiliaryWorkers ?? [];
 		applyCloudflareConfig(
 			miniflareOptions.workers[0],
 			customOptions.loadedCloudflareConfig,
-			customOptions.remoteProxyConnectionString
+			customOptions.remoteProxyConnectionString,
+			buildOutputWorkers.map((auxiliaryWorker) => auxiliaryWorker.config.name)
 		);
+		miniflareOptions.workers.push(...buildOutputWorkers);
 	}
 	return miniflareOptions;
 }
@@ -797,17 +800,19 @@ async function buildProjectMiniflareOptions(
  * Applies a `cloudflare.config.ts` Worker to the runner Worker, in Miniflare's
  * native shape. The pool's own options take precedence, and `env` and
  * `exports` are merged by name. Self-references are pointed at the (renamed)
- * runner. Tail consumers aren't supported yet and are dropped with a warning,
- * and so is the assets binding, as there's no assets directory.
+ * runner. Tail consumers other than an auxiliary Worker are dropped with a
+ * warning, and so is the assets binding, as there's no assets directory.
  *
  * @param runner The runner Worker, as converted from the pool's V4 options.
  * @param cloudflareConfig The loaded `cloudflare.config.ts`.
  * @param remoteProxyConnectionString The config's remote proxy session, if any.
+ * @param auxiliaryWorkerNames Names of the auxiliary Workers.
  */
 function applyCloudflareConfig(
 	runner: WorkerOptions,
 	{ worker, env }: LoadedNewConfig,
-	remoteProxyConnectionString: RemoteProxyConnectionString | undefined
+	remoteProxyConnectionString: RemoteProxyConnectionString | undefined,
+	auxiliaryWorkerNames: string[]
 ): void {
 	const runnerName = runner.config.name;
 	const {
@@ -845,17 +850,25 @@ function applyCloudflareConfig(
 		runnerExports[name] = rest;
 	}
 
-	for (const tail of tailConsumers ?? []) {
+	const runnerTailConsumers = (tailConsumers ?? []).filter((tail) => {
+		if (auxiliaryWorkerNames.includes(tail.worker)) {
+			return true;
+		}
 		log.warn(
-			`Tail consumers aren't supported with \`config\` yet, so "${tail.worker}" was ignored.`
+			`Tail consumer "${tail.worker}" isn't an auxiliary Worker, so it was ignored.`
 		);
-	}
+		return false;
+	});
 
 	runner.config = {
 		...config,
 		...runner.config,
 		env: { ...runnerEnv, ...runner.config.env },
 		exports: { ...runnerExports, ...runner.config.exports },
+		tailConsumers: [
+			...runnerTailConsumers,
+			...(runner.config.tailConsumers ?? []),
+		],
 	};
 	runner.dev = {
 		...runner.dev,
@@ -1087,6 +1100,8 @@ function ensureFeature(
 	}
 }
 
+export { buildOutputWorker } from "./build-output";
+export type { BuildOutputWorkerOptions } from "./build-output";
 export { cloudflarePool } from "./pool";
 export { cloudflareTest } from "./plugin";
 export * from "./d1";

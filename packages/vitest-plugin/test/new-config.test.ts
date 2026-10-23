@@ -242,6 +242,72 @@ test("wraps Workflows bound to the config's own Worker and ignores tail consumer
 	await expect(result.exitCode).resolves.toBe(0);
 	expect(result.stdout).toMatch("1 passed");
 	expect(`${result.stdout}${result.stderr}`).toMatch(
-		'Tail consumers aren\'t supported with `config` yet, so "test-worker" was ignored.'
+		'Tail consumer "test-worker" isn\'t an auxiliary Worker, so it was ignored.'
 	);
+});
+
+test("runs auxiliary Workers from build output", async ({
+	expect,
+	seed,
+	vitestRun,
+}) => {
+	const workerDir = "auth-service/.cloudflare/output/v0/workers/default";
+	await seed({
+		"vitest.config.mts": dedent`
+			import { buildOutputWorker, cloudflareTest } from "@cloudflare/vitest-plugin";
+
+			export default {
+				plugins: [
+					cloudflareTest({
+						config: true,
+						auxiliaryWorkers: [buildOutputWorker("./auth-service")],
+					}),
+				],
+			};
+		`,
+		"cloudflare.config.ts": dedent`
+			export default {
+				worker: {
+					name: "test-worker",
+					compatibilityDate: "2025-12-02",
+					env: { AUTH: { type: "worker", worker: "auth-service" } },
+				},
+			};
+		`,
+		"auth-service/.cloudflare/output/v0/config.json": JSON.stringify({
+			buildContext: { isPreview: false, mode: "production" },
+		}),
+		[`${workerDir}/worker.config.json`]: JSON.stringify({
+			name: "auth-service",
+			compatibilityDate: "2025-12-02",
+			env: { TOKEN: { type: "secret" } },
+			manifest: {
+				type: "complete",
+				mainModule: "index.js",
+				modules: { "index.js": { type: "esm" } },
+			},
+		}),
+		[`${workerDir}/bundle/index.js`]: dedent`
+			export default {
+				fetch(request, env) {
+					return new Response("auth:" + env.TOKEN);
+				},
+			};
+		`,
+		"auth-service/.dev.vars": "TOKEN=from-auth-dev-vars",
+		"index.test.ts": dedent`
+			import { env } from "cloudflare:test";
+			import { it } from "vitest";
+
+			it("calls a Worker loaded from build output", async ({ expect }) => {
+				const response = await env.AUTH.fetch("http://example.com");
+				expect(await response.text()).toBe("auth:from-auth-dev-vars");
+			});
+		`,
+	});
+
+	const result = await vitestRun();
+
+	await expect(result.exitCode).resolves.toBe(0);
+	expect(result.stdout).toMatch("1 passed");
 });

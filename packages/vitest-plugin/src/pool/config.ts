@@ -12,6 +12,7 @@ import {
 } from "miniflare";
 import { z } from "zod";
 import { getRemoteBindingsAuth } from "./auth";
+import { loadBuildOutputWorker } from "./build-output";
 import {
 	getProjectPath,
 	getRelativeProjectConfigPath,
@@ -28,6 +29,7 @@ import type {
 	LegacyWorkerOptions,
 	RemoteProxyConnectionString,
 	V4ModuleRule,
+	WorkerOptions,
 } from "miniflare";
 import type { TestProject } from "vitest/node";
 import type { ZodError } from "zod";
@@ -102,6 +104,20 @@ const WorkersPoolOptionsSchema = z.object({
 	 * defaults to `"test"` and can be overridden with `--mode`.
 	 */
 	config: CloudflareConfigSchema.optional(),
+	/**
+	 * Workers to run alongside the Worker under test, loaded from other
+	 * projects' build output with `buildOutputWorker()`. Requires `config`.
+	 */
+	auxiliaryWorkers: z
+		.array(
+			z.object({
+				buildOutput: z.object({
+					root: z.string(),
+					name: z.string().optional(),
+				}),
+			})
+		)
+		.optional(),
 });
 
 type CompatibleWorkerOptions = LegacyWorkerOptions & {
@@ -161,6 +177,12 @@ export type WorkersPoolOptionsWithDefines = WorkersPoolOptions & {
 	 * @internal
 	 */
 	remoteProxyConnectionString?: RemoteProxyConnectionString;
+	/**
+	 * The `auxiliaryWorkers`, loaded from build output.
+	 *
+	 * @internal
+	 */
+	loadedAuxiliaryWorkers?: WorkerOptions[];
 };
 
 // Module rules Wrangler applies by default, which Wrangler configs get from
@@ -380,6 +402,11 @@ async function parseCustomPoolOptions(
 			"`miniflare` and `config` cannot be used together. Configure the Worker in `cloudflare.config.ts` instead."
 		);
 	}
+	if (newConfig === undefined && options.auxiliaryWorkers !== undefined) {
+		throw new TypeError(
+			"`auxiliaryWorkers` requires `config`. Without it, define auxiliary Workers in `miniflare.workers`."
+		);
+	}
 	options.miniflare ??= {};
 	const miniflareModuleRules = options.miniflare.modulesRules;
 
@@ -501,6 +528,12 @@ async function parseCustomPoolOptions(
 			...(worker.compatibilityFlags ?? []),
 		];
 		options.moduleRules = DEFAULT_MODULE_RULES;
+		// Read on every start, so builds made in `globalSetup` are picked up
+		options.loadedAuxiliaryWorkers = await Promise.all(
+			(options.auxiliaryWorkers ?? []).map((auxiliaryWorker) =>
+				loadBuildOutputWorker(rootPath, auxiliaryWorker)
+			)
+		);
 	} else if (options.wrangler?.configPath !== undefined) {
 		configPath = path.resolve(rootPath, options.wrangler.configPath);
 		// Make sure future accesses to `configPath` see a fully-resolved path

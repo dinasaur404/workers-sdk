@@ -39,10 +39,13 @@ file:
   (`@cloudflare/config`'s `loadAndParseConfig()`), never through Wrangler. It is already
   in the shape of Miniflare's native `WorkerOptions.config`, so `applyCloudflareConfig()`
   in `src/pool/index.ts` applies it to the runner after the pool's V4 options are
-  converted. `miniflare` options can't be combined with `config`.
-  Remote bindings use cf credentials (`src/pool/auth.ts`).
-  `src/pool/auth.ts`, `src/pool/local-env.ts`, `src/pool/remote-bindings.ts` and
-  `getWorkerZone()` in `src/pool/index.ts` mirror `@cloudflare/vite-plugin`'s, and
+  converted. `miniflare` options can't be combined with `config`; instead,
+  `auxiliaryWorkers` loads other Workers from their build output (`buildOutputWorker()`
+  in `src/pool/build-output.ts`, read with `@cloudflare/build-output-utils` on every pool
+  start). Remote bindings use cf credentials (`src/pool/auth.ts`).
+  `src/pool/auth.ts`, `src/pool/local-env.ts`, `src/pool/remote-bindings.ts`,
+  `getWorkerZone()` in `src/pool/index.ts` and `getMiniflareManifest()` in
+  `src/pool/build-output.ts` mirror `@cloudflare/vite-plugin`'s, and
   `DEFAULT_MODULE_RULES` in `src/pool/config.ts` mirrors Wrangler's; keep them in sync. `ctx.mode` comes from
   `project.vite.config.mode`.
 
