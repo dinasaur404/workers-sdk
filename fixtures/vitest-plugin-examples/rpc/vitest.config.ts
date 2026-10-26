@@ -7,16 +7,7 @@ export default mergeConfig(
 	defineProject({
 		plugins: [
 			cloudflareTest({
-				miniflare: {
-					// Required to use `exports.default.scheduled()`. This is an experimental
-					// compatibility flag, and cannot be enabled in production.
-					// `nodejs_compat` is not listed here because the inferred compatibility
-					// date enables it by default, and specifying it would be an error.
-					compatibilityFlags: ["service_binding_extra_handlers"],
-				},
-				wrangler: {
-					configPath: "./wrangler.jsonc",
-				},
+				config: true,
 			}),
 		],
 	})
