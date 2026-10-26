@@ -55,7 +55,14 @@ function wranglerFactory() {
 	};
 }
 
-describe("remote bindings", () => {
+interface InvalidOptionsCase {
+	name: string;
+	files?: Record<string, string>;
+	options: Record<string, unknown>;
+	message: string;
+}
+
+describe("parseProjectOptions()", () => {
 	runInTempDir();
 
 	let project: TestProject;
@@ -80,53 +87,69 @@ describe("remote bindings", () => {
 		);
 	});
 
-	it("uses cf credentials for cloudflare.config.ts, without Wrangler", async ({
-		expect,
-	}) => {
-		await fs.writeFile(
-			"cloudflare.config.ts",
-			`export default {
-				accountId: "account-id",
-				worker: {
-					name: "test-worker",
-					compatibilityDate: "2025-12-02",
-					env: {
-						KV: { type: "kv", id: "kv-id", dev: { remote: true } },
-					},
-				},
-			};`
-		);
+	it.for<InvalidOptionsCase>([
+		{
+			name: "the removed `experimental.newConfig` option",
+			options: { experimental: { newConfig: true } },
+			message:
+				"`experimental.newConfig` has been removed. Use `config` instead.",
+		},
+		{
+			name: "`wrangler` combined with `config`",
+			options: { wrangler: { configPath: "./wrangler.jsonc" }, config: true },
+			message:
+				"`wrangler` and `config` cannot be used together. Use `wrangler` to load a Wrangler configuration file, or `config` to load `cloudflare.config.ts`.",
+		},
+		{
+			name: "`miniflare` combined with `config`",
+			options: { config: true, miniflare: { kvNamespaces: ["KV"] } },
+			message:
+				"`miniflare` and `config` cannot be used together. Configure the Worker in `cloudflare.config.ts` instead.",
+		},
+		{
+			name: "a missing cloudflare.config.ts",
+			options: { config: true },
+			message: "`config` is enabled but no `cloudflare.config.ts` was found at",
+		},
+		{
+			name: "a Wrangler config passed to `config`, suggesting `wrangler`",
+			files: { "wrangler.jsonc": "{}" },
+			options: { config: "./wrangler.jsonc" },
+			message:
+				"`wrangler.jsonc` looks like a Wrangler configuration file. Load it with `wrangler: { configPath }` instead of `config`.",
+		},
+		{
+			name: "a config that doesn't define a Worker",
+			files: {
+				"cloudflare.config.ts": `export default { accountId: "abc123" };`,
+			},
+			options: { config: true },
+			message:
+				"`cloudflare.config.ts` must define a Worker using the `worker` property.",
+		},
+		{
+			name: "an invalid config",
+			// `compatibilityDate` is required
+			files: {
+				"cloudflare.config.ts": `export default { worker: { name: "test-worker" } };`,
+			},
+			options: { config: true },
+			message: "→ at worker.compatibilityDate",
+		},
+	])("rejects $name", async ({ files = {}, options, message }, { expect }) => {
+		for (const [name, contents] of Object.entries(files)) {
+			await fs.writeFile(name, contents);
+		}
 		const { parseProjectOptions } = await import("../src/pool/config");
 
-		const options = await parseProjectOptions(project, {
-			config: true,
-		});
-		await parseProjectOptions(project, { config: true });
-
-		const [[details, , auth, context], [, , secondAuth]] =
-			maybeStartOrUpdateRemoteProxySession.mock.calls;
-		expect(details).toMatchObject({
-			name: "test-worker",
-			bindings: {
-				KV: { type: "kv_namespace", id: "kv-id", remote: true },
-			},
-		});
-		expect(context).toMatchObject({ cliDisplayName: "cf" });
-		// The same hook, so the session isn't restarted on every re-parse
-		expect(secondAuth).toBe(auth);
-		await expect(auth()).resolves.toEqual({
-			accountId: "cf-account-id",
-			apiToken: { apiToken: "cf-token" },
-		});
-		expect(requireAuth).toHaveBeenCalledWith({ account_id: "account-id" });
-		expect(resolveProfile).toHaveBeenCalledWith({ cwd: process.cwd() });
-		expect(options.remoteProxyConnectionString).toBe(
-			remoteProxyConnectionString
+		await expect(parseProjectOptions(project, options)).rejects.toThrow(
+			message
 		);
-		expect(state.wranglerImported).toBe(false);
 	});
 
-	it("creates a new hook when the account changes", async ({ expect }) => {
+	it("uses cf credentials for remote bindings, without Wrangler", async ({
+		expect,
+	}) => {
 		// A config function, so the account follows the mode between parses
 		await fs.writeFile(
 			"cloudflare.config.ts",
@@ -142,22 +165,42 @@ describe("remote bindings", () => {
 			});`
 		);
 		const { parseProjectOptions } = await import("../src/pool/config");
-
-		await parseProjectOptions(project, { config: true });
 		const stagingProject = {
 			config: project.config,
 			vite: { config: { mode: "staging", envDir: process.cwd() } },
 		} as unknown as TestProject;
+
+		const options = await parseProjectOptions(project, { config: true });
+		await parseProjectOptions(project, { config: true });
 		await parseProjectOptions(stagingProject, { config: true });
 
-		const [[, , auth], [, , newAuth]] =
+		const [[details, , auth, context], [, , sameAuth], [, , stagingAuth]] =
 			maybeStartOrUpdateRemoteProxySession.mock.calls;
-		// A new hook, so the session restarts with the new account
-		expect(newAuth).not.toBe(auth);
-		await newAuth();
-		expect(requireAuth).toHaveBeenCalledWith({
-			account_id: "staging-account",
+		expect(details).toMatchObject({
+			name: "test-worker",
+			bindings: {
+				KV: { type: "kv_namespace", id: "kv-id", remote: true },
+			},
 		});
+		expect(context).toMatchObject({ cliDisplayName: "cf" });
+		expect(options.remoteProxyConnectionString).toBe(
+			remoteProxyConnectionString
+		);
+		// The same account reuses the session's hook, so it isn't restarted, and
+		// a different account gets a new hook, so it restarts with that account
+		expect(sameAuth).toBe(auth);
+		expect(stagingAuth).not.toBe(auth);
+		await expect(auth()).resolves.toEqual({
+			accountId: "cf-account-id",
+			apiToken: { apiToken: "cf-token" },
+		});
+		await stagingAuth();
+		expect(requireAuth.mock.calls).toEqual([
+			[{ account_id: "test-account" }],
+			[{ account_id: "staging-account" }],
+		]);
+		expect(resolveProfile).toHaveBeenCalledWith({ cwd: process.cwd() });
+		expect(state.wranglerImported).toBe(false);
 	});
 
 	it("keeps Wrangler's credentials for Wrangler configs", async ({
