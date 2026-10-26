@@ -1,5 +1,6 @@
 declare namespace Cloudflare {
 	interface Env {
-		GREETING_WORKFLOW: Workflow; // Defined in `vitest.config.ts`
+		// Bound only in tests, so the generated `Env` marks it optional
+		GREETING_WORKFLOW: Workflow;
 	}
 }

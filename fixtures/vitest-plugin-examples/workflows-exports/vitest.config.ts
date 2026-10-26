@@ -7,18 +7,7 @@ export default mergeConfig(
 	defineProject({
 		plugins: [
 			cloudflareTest({
-				wrangler: {
-					configPath: "./wrangler.jsonc",
-				},
-				miniflare: {
-					// Add a test-only binding, so tests can introspect the Workflow
-					workflows: {
-						GREETING_WORKFLOW: {
-							name: "greeting-workflow",
-							className: "GreetingWorkflow",
-						},
-					},
-				},
+				config: true,
 			}),
 		],
 		test: {
