@@ -24,6 +24,6 @@ cloudflareTest({
 });
 ```
 
-`buildOutputWorker()` takes the root of the built project and, optionally, the name of the Worker to load. That Worker's secrets come from the built project's `.dev.vars` or `.env` files.
+`buildOutputWorker()` takes the root of the built project and, optionally, the name of the Worker to load. That Worker's secrets come from `.dev.vars` or `.env` files in the root of the built project, in the build's mode. That's usually `production`, so files such as `.dev.vars.production` take precedence.
 
 The experimental `experimental.newConfig` option has been removed. Use `config` instead.

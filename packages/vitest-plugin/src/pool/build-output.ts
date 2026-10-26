@@ -97,6 +97,16 @@ export async function loadBuildOutputWorker(
 		devVars,
 		/* remoteBindings */ false
 	);
+	const remoteBindings = Object.entries(env ?? {}).flatMap(([name, binding]) =>
+		(binding as { dev?: { remote?: boolean } }).dev?.remote === true
+			? [name]
+			: []
+	);
+	if (remoteBindings.length > 0) {
+		console.warn(
+			`Auxiliary Workers don't support remote bindings, so ${remoteBindings.join(", ")} in Worker "${config.name}" run locally.`
+		);
+	}
 	if (missingSecrets.length > 0) {
 		console.warn(
 			`Missing required secrets for Worker "${config.name}": ${missingSecrets.join(", ")}. Add them to \`.dev.vars\` or \`.env\` in ${root}.`

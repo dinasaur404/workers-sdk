@@ -784,7 +784,12 @@ async function buildProjectMiniflareOptions(
 
 	const miniflareOptions = convertV4MiniflareOptions(options);
 	if (customOptions.loadedCloudflareConfig !== undefined) {
-		const buildOutputWorkers = customOptions.loadedAuxiliaryWorkers ?? [];
+		const configWorkerName = customOptions.loadedCloudflareConfig.worker.name;
+		const runnerName = miniflareOptions.workers[0].config.name;
+		const buildOutputWorkers = (customOptions.loadedAuxiliaryWorkers ?? []).map(
+			(auxiliaryWorker) =>
+				pointAtRunner(auxiliaryWorker, configWorkerName, runnerName)
+		);
 		applyCloudflareConfig(
 			miniflareOptions.workers[0],
 			customOptions.loadedCloudflareConfig,
@@ -794,6 +799,41 @@ async function buildProjectMiniflareOptions(
 		miniflareOptions.workers.push(...buildOutputWorkers);
 	}
 	return miniflareOptions;
+}
+
+/**
+ * Points an auxiliary Worker's bindings and tail consumers that target the
+ * config's Worker at the (renamed) runner.
+ *
+ * @param auxiliaryWorker The auxiliary Worker, in Miniflare's native shape.
+ * @param configWorkerName Name of the config's Worker.
+ * @param runnerName Name of the runner Worker.
+ * @returns The auxiliary Worker with its references updated.
+ */
+function pointAtRunner(
+	auxiliaryWorker: WorkerOptions,
+	configWorkerName: string,
+	runnerName: string
+): WorkerOptions {
+	const env: NonNullable<WorkerOptions["config"]["env"]> = {};
+	for (const [name, binding] of Object.entries(
+		auxiliaryWorker.config.env ?? {}
+	)) {
+		env[name] =
+			(binding.type === "worker" ||
+				binding.type === "durable-object" ||
+				binding.type === "workflow") &&
+			binding.worker === configWorkerName
+				? { ...binding, worker: runnerName }
+				: binding;
+	}
+	const tailConsumers = auxiliaryWorker.config.tailConsumers?.map((tail) =>
+		tail.worker === configWorkerName ? { ...tail, worker: runnerName } : tail
+	);
+	return {
+		...auxiliaryWorker,
+		config: { ...auxiliaryWorker.config, env, tailConsumers },
+	};
 }
 
 /**
@@ -851,7 +891,10 @@ function applyCloudflareConfig(
 	}
 
 	const runnerTailConsumers = (tailConsumers ?? []).filter((tail) => {
-		if (auxiliaryWorkerNames.includes(tail.worker)) {
+		if (
+			tail.worker !== worker.name &&
+			auxiliaryWorkerNames.includes(tail.worker)
+		) {
 			return true;
 		}
 		log.warn(

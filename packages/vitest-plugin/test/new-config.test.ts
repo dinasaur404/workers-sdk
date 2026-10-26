@@ -270,7 +270,15 @@ test("runs auxiliary Workers from build output", async ({
 				worker: {
 					name: "test-worker",
 					compatibilityDate: "2025-12-02",
+					entrypoint: "./index.ts",
 					env: { AUTH: { type: "worker", worker: "auth-service" } },
+				},
+			};
+		`,
+		"index.ts": dedent`
+			export default {
+				fetch() {
+					return new Response("main");
 				},
 			};
 		`,
@@ -280,7 +288,11 @@ test("runs auxiliary Workers from build output", async ({
 		[`${workerDir}/worker.config.json`]: JSON.stringify({
 			name: "auth-service",
 			compatibilityDate: "2025-12-02",
-			env: { TOKEN: { type: "secret" } },
+			env: {
+				TOKEN: { type: "secret" },
+				// Refers back to the Worker under test by its config name
+				MAIN: { type: "worker", worker: "test-worker" },
+			},
 			manifest: {
 				type: "complete",
 				mainModule: "index.js",
@@ -289,19 +301,21 @@ test("runs auxiliary Workers from build output", async ({
 		}),
 		[`${workerDir}/bundle/index.js`]: dedent`
 			export default {
-				fetch(request, env) {
-					return new Response("auth:" + env.TOKEN);
+				async fetch(request, env) {
+					const main = await env.MAIN.fetch(request);
+					return new Response("auth:" + env.TOKEN + ":" + (await main.text()));
 				},
 			};
 		`,
-		"auth-service/.dev.vars": "TOKEN=from-auth-dev-vars",
+		// The build's mode is \`production\`, so this file is read
+		"auth-service/.dev.vars.production": "TOKEN=from-auth-dev-vars",
 		"index.test.ts": dedent`
 			import { env } from "cloudflare:test";
 			import { it } from "vitest";
 
 			it("calls a Worker loaded from build output", async ({ expect }) => {
 				const response = await env.AUTH.fetch("http://example.com");
-				expect(await response.text()).toBe("auth:from-auth-dev-vars");
+				expect(await response.text()).toBe("auth:from-auth-dev-vars:main");
 			});
 		`,
 	});
